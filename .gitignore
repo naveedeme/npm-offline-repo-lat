@@ -1,0 +1,14 @@
+node_modules/
+*.tar.gz
+*.tgz
+artifacts/
+release/
+release-artifacts/
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.env
+.env.local
+dist/
+build/

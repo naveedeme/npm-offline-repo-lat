@@ -1,0 +1,511 @@
+name: Download NPM Packages & Create Release
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGER SUMMARY:
+#
+#  1. push to main/master       → runs workflow, creates/updates "latest" release
+#  2. push a version tag        → runs workflow, creates versioned release (v1.0.0)
+#  3. Manual (workflow_dispatch) → runs workflow with your chosen tag name
+#
+# So YES — every push to main automatically downloads all packages and
+# publishes a new "latest" release. Push a tag for a versioned release.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*.*.*'
+
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag name (e.g. v1.2.0). Leave blank to auto-generate.'
+        required: false
+        default: ''
+      node_version:
+        description: 'Node.js version to use'
+        required: false
+        default: '24.11.1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: ${{ github.event.inputs.node_version || '24.11.1' }}
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 0 — Resolve the release tag before any download jobs start
+  # ────────────────────────────────────────────────────────────────────────────
+  resolve-tag:
+    name: '🏷 Resolve Release Tag'
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.set-tag.outputs.tag }}
+      is_versioned: ${{ steps.set-tag.outputs.is_versioned }}
+    steps:
+      - name: Set release tag
+        id: set-tag
+        run: |
+          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            # Manual input takes priority
+            TAG="${{ github.event.inputs.release_tag }}"
+            IS_VERSIONED="false"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # Push to a version tag (e.g. git push origin v1.2.0)
+            TAG="${{ github.ref_name }}"
+            IS_VERSIONED="true"
+          else
+            # Push to main/master → auto-generate tag from date + short SHA
+            # FIX: was `else:` (invalid bash syntax) — colon removed
+            TAG="v$(date -u +'%Y.%m.%d')-$(echo '${{ github.sha }}' | cut -c1-7)"
+            IS_VERSIONED="false"
+          fi
+
+          # Guard: abort early if tag is still empty (should never happen now)
+          if [ -z "$TAG" ]; then
+            echo "❌ ERROR: could not resolve a release tag. Aborting."
+            exit 1
+          fi
+
+          echo "tag=${TAG}"           >> $GITHUB_OUTPUT
+          echo "is_versioned=${IS_VERSIONED}" >> $GITHUB_OUTPUT
+          echo "Resolved release tag: ${TAG} (versioned=${IS_VERSIONED})"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 1-10 — Download each framework's packages in parallel
+  # ────────────────────────────────────────────────────────────────────────────
+  download-react-vite:
+    name: '📦 react-vite'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/react-vite
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/react-vite
+        run: tar -czf react-vite-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: react-vite-modules
+          path: packages/react-vite/react-vite-node_modules.tar.gz
+          retention-days: 1
+
+  download-nextjs:
+    name: '📦 nextjs'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/nextjs
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/nextjs
+        run: tar -czf nextjs-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-modules
+          path: packages/nextjs/nextjs-node_modules.tar.gz
+          retention-days: 1
+
+  download-vuejs-vite:
+    name: '📦 vuejs-vite'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/vuejs-vite
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/vuejs-vite
+        run: tar -czf vuejs-vite-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vuejs-vite-modules
+          path: packages/vuejs-vite/vuejs-vite-node_modules.tar.gz
+          retention-days: 1
+
+  download-nuxt:
+    name: '📦 nuxt'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/nuxt
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/nuxt
+        run: tar -czf nuxt-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuxt-modules
+          path: packages/nuxt/nuxt-node_modules.tar.gz
+          retention-days: 1
+
+  download-angular:
+    name: '📦 angular'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/angular
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/angular
+        run: tar -czf angular-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: angular-modules
+          path: packages/angular/angular-node_modules.tar.gz
+          retention-days: 1
+
+  download-svelte:
+    name: '📦 svelte'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/svelte
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/svelte
+        run: tar -czf svelte-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: svelte-modules
+          path: packages/svelte/svelte-node_modules.tar.gz
+          retention-days: 1
+
+  download-remix:
+    name: '📦 remix'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/remix
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/remix
+        run: tar -czf remix-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remix-modules
+          path: packages/remix/remix-node_modules.tar.gz
+          retention-days: 1
+
+  download-astro:
+    name: '📦 astro'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/astro
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/astro
+        run: tar -czf astro-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: astro-modules
+          path: packages/astro/astro-node_modules.tar.gz
+          retention-days: 1
+
+  download-gatsby:
+    name: '📦 gatsby'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/gatsby
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/gatsby
+        run: tar -czf gatsby-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gatsby-modules
+          path: packages/gatsby/gatsby-node_modules.tar.gz
+          retention-days: 1
+
+  download-nodejs-backend:
+    name: '📦 nodejs-backend'
+    runs-on: ubuntu-latest
+    needs: resolve-tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install packages
+        working-directory: packages/nodejs-backend
+        run: |
+          npm install --legacy-peer-deps --prefer-offline 2>&1 || \
+          npm install --legacy-peer-deps --force 2>&1
+          echo "✅ Done."
+      - name: Pack node_modules
+        working-directory: packages/nodejs-backend
+        run: tar -czf nodejs-backend-node_modules.tar.gz node_modules/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-backend-modules
+          path: packages/nodejs-backend/nodejs-backend-node_modules.tar.gz
+          retention-days: 1
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 12 — Collect everything, build cumulative tarball, publish release
+  # ────────────────────────────────────────────────────────────────────────────
+  create-release:
+    name: '🚀 Create Release'
+    runs-on: ubuntu-latest
+    needs:
+      - resolve-tag
+      - download-react-vite
+      - download-nextjs
+      - download-vuejs-vite
+      - download-nuxt
+      - download-angular
+      - download-svelte
+      - download-remix
+      - download-astro
+      - download-gatsby
+      - download-nodejs-backend
+
+    env:
+      # FIX: pull tag directly from the job output — the job-level env block
+      # is evaluated before steps run, so it's the safe place to set this once.
+      RELEASE_TAG: ${{ needs.resolve-tag.outputs.release_tag }}
+      IS_VERSIONED: ${{ needs.resolve-tag.outputs.is_versioned }}
+
+    steps:
+      # FIX: fetch-depth: 0 so `git log` has history for the commit message
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        run: |
+          if [ -z "${{ env.RELEASE_TAG }}" ]; then
+            echo "❌ RELEASE_TAG is empty — cannot create a release without a tag."
+            exit 1
+          fi
+          echo "✅ Release tag: ${{ env.RELEASE_TAG }}"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-artifacts/
+
+      - name: Display downloaded artifacts
+        run: |
+          echo "=== All downloaded tarballs ==="
+          find downloaded-artifacts/ -name "*.tar.gz" -exec du -sh {} \; | sort
+          echo ""
+          echo "Total compressed size:"
+          du -sh downloaded-artifacts/
+
+      - name: Build release directory structure
+        run: |
+          mkdir -p release/node_modules_by_framework
+          mkdir -p release/package_jsons
+
+          for fw in react-vite nextjs vuejs-vite nuxt angular svelte remix astro gatsby nodejs-backend; do
+            src="downloaded-artifacts/${fw}-modules/${fw}-node_modules.tar.gz"
+            if [ -f "$src" ]; then
+              mv "$src" "release/node_modules_by_framework/${fw}-node_modules.tar.gz"
+              echo "  ✅ $fw"
+            else
+              echo "  ⚠  Missing: $fw"
+            fi
+          done
+
+          for fw in react-vite nextjs vuejs-vite nuxt angular svelte remix astro gatsby nodejs-backend; do
+            mkdir -p "release/package_jsons/$fw"
+            cp "packages/$fw/package.json" "release/package_jsons/$fw/"
+          done
+
+      - name: Log individual framework sizes
+        run: |
+          echo "Individual framework tarball sizes:"
+          for f in release/node_modules_by_framework/*.tar.gz; do
+            echo "  $(du -sh "$f" | cut -f1)  $(basename "$f")"
+          done
+
+      - name: Generate release notes
+        run: |
+          TAG="${{ env.RELEASE_TAG }}"
+          BUILT_AT=$(date -u '+%Y-%m-%d %H:%M UTC')
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null || echo "No commit message")
+          COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          cat > release_notes.md << EOF
+          ## 📦 NPM Offline Package Collection ${TAG}
+
+          Pre-downloaded \`node_modules\` for **10 web development framework** configurations.
+          Built on: ${BUILT_AT} | Commit: \`${COMMIT_SHA}\` | Node.js: ${{ env.NODE_VERSION }}
+
+          > ${COMMIT_MSG}
+
+          ---
+
+          ### 🗂 Downloads
+
+          Download only the framework(s) you need — each asset is independent.
+
+          | Asset | Framework | Description |
+          |-------|-----------|-------------|
+          | \`react-vite-node_modules.tar.gz\` | React + Vite | Full React 18 ecosystem |
+          | \`nextjs-node_modules.tar.gz\` | Next.js 14 | App Router, Auth.js, SEO |
+          | \`vuejs-vite-node_modules.tar.gz\` | Vue 3 + Vite | Vuetify, Element Plus, Pinia |
+          | \`nuxt-node_modules.tar.gz\` | Nuxt 3 | Nuxt UI, content, image |
+          | \`angular-node_modules.tar.gz\` | Angular 18 | NgRx, Angular Material, Syncfusion |
+          | \`svelte-node_modules.tar.gz\` | SvelteKit | SMUI, Threlte, adapters |
+          | \`remix-node_modules.tar.gz\` | Remix v2 | remix-auth, full React ecosystem |
+          | \`astro-node_modules.tar.gz\` | Astro 4 | Multi-framework, MDX, SSG/SSR |
+          | \`gatsby-node_modules.tar.gz\` | Gatsby 5 | Source plugins, MDX, image |
+          | \`nodejs-backend-node_modules.tar.gz\` | Node.js Backend | Express + Fastify + NestJS + Hono |
+
+          ---
+
+          ### 🚀 Quick Start
+
+          **Linux / macOS:**
+          \`\`\`bash
+          # Extract directly into your project
+          tar -xzf react-vite-node_modules.tar.gz -C /path/to/project/
+          \`\`\`
+
+          **Windows (PowerShell):**
+          \`\`\`powershell
+          tar -xzf react-vite-node_modules.tar.gz -C C:\\path\\to\\project
+          \`\`\`
+
+          ---
+
+          ### ⚠️ Native Modules on Windows
+          Packages like \`sharp\`, \`argon2\`, \`better-sqlite3\`, \`serialport\` are compiled
+          for Linux (Ubuntu). On Windows, run \`npm rebuild\` after extracting.
+
+          **Requirements:** Node.js >= 24.11.1 · npm >= 10 · tar (built into Win10+)
+          EOF
+
+      # FIX: broaden the condition to also cover workflow_dispatch (non-versioned runs),
+      # not just non-tag pushes — both cases should overwrite the rolling release.
+      - name: Delete existing release if updating rolling release
+        if: env.IS_VERSIONED == 'false'
+        run: |
+          TAG="${{ env.RELEASE_TAG }}"
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          git push origin --delete "$TAG" 2>/dev/null || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: '📦 NPM Offline Packages ${{ env.RELEASE_TAG }}'
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ env.IS_VERSIONED == 'false' }}
+          # FIX: make_latest must be the string "true" or "false" — boolean
+          # expressions aren't supported here; use the output string directly.
+          make_latest: ${{ env.IS_VERSIONED }}
+          files: |
+            release/node_modules_by_framework/react-vite-node_modules.tar.gz
+            release/node_modules_by_framework/nextjs-node_modules.tar.gz
+            release/node_modules_by_framework/vuejs-vite-node_modules.tar.gz
+            release/node_modules_by_framework/nuxt-node_modules.tar.gz
+            release/node_modules_by_framework/angular-node_modules.tar.gz
+            release/node_modules_by_framework/svelte-node_modules.tar.gz
+            release/node_modules_by_framework/remix-node_modules.tar.gz
+            release/node_modules_by_framework/astro-node_modules.tar.gz
+            release/node_modules_by_framework/gatsby-node_modules.tar.gz
+            release/node_modules_by_framework/nodejs-backend-node_modules.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          TAG="${{ env.RELEASE_TAG }}"
+          echo "## ✅ Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Framework | Tarball Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------------|" >> $GITHUB_STEP_SUMMARY
+          for f in release/node_modules_by_framework/*.tar.gz; do
+            SIZE=$(du -sh "$f" | cut -f1)
+            NAME=$(basename "$f" "-node_modules.tar.gz")
+            echo "| $NAME | $SIZE |" >> $GITHUB_STEP_SUMMARY
+          done
